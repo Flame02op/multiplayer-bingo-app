@@ -13,6 +13,7 @@ const App = () => {
   const [gameId, setGameId] = useState('');
   const [copied, setCopied] = useState(false);
   const [isCallingNumber, setIsCallingNumber] = useState(false);
+  const [aiAnnouncement, setAiAnnouncement] = useState('');
 
   // Generate a random bingo card
   const generateCard = () => {
@@ -46,6 +47,53 @@ const App = () => {
 
   const generateGameId = () => {
     return Math.random().toString(36).substring(2, 8).toUpperCase();
+  };
+
+  // Get AI announcement for the called number
+  const getAIAnnouncement = async (number, calledCount, players) => {
+    try {
+      const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=' + import.meta.env.VITE_GEMINI_API_KEY, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: `You are an energetic, funny Bingo game host. A number has just been called in the game.
+
+Number called: ${getLetter(number)}-${number}
+Total numbers called so far: ${calledCount}
+Total players: ${players.length}
+
+Generate a brief, fun announcement (1-2 sentences max) that:
+1. Announces the number with a creative phrase or fun fact about the number
+2. Optionally adds light commentary about the game progress
+
+Keep it short, energetic, and entertaining! Examples:
+- "B-7, lucky number seven! We're heating up, folks!"
+- "G-52, deck of cards! Someone's getting close, I can feel it!"
+- "N-42, the answer to life, the universe, and everything! Half the board is called!"
+
+Your announcement:`
+            }]
+          }],
+          generationConfig: {
+            temperature: 0.9,
+            maxOutputTokens: 100,
+          }
+        })
+      });
+
+      const data = await response.json();
+      if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
+        return data.candidates[0].content.parts[0].text.trim();
+      }
+      return `${getLetter(number)}-${number}! Let's go!`;
+    } catch (error) {
+      console.error('AI announcement error:', error);
+      return `${getLetter(number)}-${number}!`;
+    }
   };
 
   // Get game ID from URL or generate new one
@@ -146,7 +194,7 @@ const App = () => {
   const callNumber = async () => {
     if (!isHost || !gameData || gameData.state !== 'playing' || !gameId) return;
     if (isCallingNumber) return; // Prevent concurrent calls
-
+    
     setIsCallingNumber(true);
 
     const available = Array.from({ length: 75 }, (_, i) => i + 1)
@@ -160,17 +208,24 @@ const App = () => {
     }
 
     const next = available[Math.floor(Math.random() * available.length)];
+    const newCalledNumbers = [...(gameData.calledNumbers || []), next];
+    
+    // Get AI announcement
+    const players = gameData.players ? Object.values(gameData.players) : [];
+    const announcement = await getAIAnnouncement(next, newCalledNumbers.length, players);
+    setAiAnnouncement(announcement);
     
     const gameRef = ref(database, `games/${gameId}`);
     const updates = {
       currentNumber: next,
-      calledNumbers: [...(gameData.calledNumbers || []), next]
+      calledNumbers: newCalledNumbers,
+      lastAnnouncement: announcement
     };
 
     // Mark numbers on all cards
-    const players = gameData.players || {};
-    Object.keys(players).forEach(playerId => {
-      const player = players[playerId];
+    const playersObj = gameData.players || {};
+    Object.keys(playersObj).forEach(playerId => {
+      const player = playersObj[playerId];
       if (!player || !player.card) return;
       
       const updatedCard = player.card.map(col => col.map(cell => 
@@ -290,6 +345,10 @@ const App = () => {
       if (myPlayer.id === gameData.hostId) {
         setIsHost(true);
       }
+    }
+    // Update AI announcement for all players
+    if (gameData?.lastAnnouncement) {
+      setAiAnnouncement(gameData.lastAnnouncement);
     }
   }, [gameData, myId]);
 
@@ -444,9 +503,17 @@ const App = () => {
             {/* Current Number Display */}
             {gameData.currentNumber && gameData.state === 'playing' && (
               <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 mb-6 text-center">
-                <div className="text-6xl font-bold text-white mb-2">
+                <div className="text-6xl font-bold text-white mb-4">
                   {getLetter(gameData.currentNumber)}-{gameData.currentNumber}
                 </div>
+                {aiAnnouncement && (
+                  <div className="bg-gradient-to-r from-yellow-400/20 to-orange-400/20 backdrop-blur rounded-xl p-4 mb-4 border-2 border-yellow-400/50">
+                    <div className="text-yellow-300 text-sm font-semibold mb-1">🎙️ AI HOST</div>
+                    <div className="text-white text-lg font-medium italic">
+                      "{aiAnnouncement}"
+                    </div>
+                  </div>
+                )}
                 <div className="text-purple-200">
                   {(gameData.calledNumbers || []).length} of 75 numbers called
                 </div>
