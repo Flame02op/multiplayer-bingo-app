@@ -51,8 +51,42 @@ const App = () => {
 
   // Get AI announcement for the called number
   const getAIAnnouncement = async (number, calledCount, players) => {
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    
+    // Check if API key exists
+    if (!apiKey) {
+      console.warn('⚠️ Gemini API key not found! Using fallback announcements.');
+      const fallbacks = [
+        `${getLetter(number)}-${number}! We're at ${calledCount} numbers called!`,
+        `Here comes ${getLetter(number)}-${number}! Keep those daubers ready, folks!`,
+        `${getLetter(number)}-${number}, and the game continues! ${calledCount} down, ${75 - calledCount} to go!`
+      ];
+      return fallbacks[Math.floor(Math.random() * fallbacks.length)];
+    }
+
     try {
-      const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=' + import.meta.env.VITE_GEMINI_API_KEY, {
+      // Check for close-to-winning players
+      const playersArray = Object.values(players);
+      let closeCalls = 0;
+      playersArray.forEach(player => {
+        if (player.card) {
+          const card = player.card;
+          // Check rows
+          for (let row = 0; row < 5; row++) {
+            const markedInRow = card.filter(col => col[row]?.marked).length;
+            if (markedInRow === 4) closeCalls++;
+          }
+          // Check columns
+          for (let col = 0; col < 5; col++) {
+            const markedInCol = card[col]?.filter(cell => cell?.marked).length || 0;
+            if (markedInCol === 4) closeCalls++;
+          }
+        }
+      });
+
+      console.log('🤖 Calling Gemini API...');
+      
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -60,39 +94,77 @@ const App = () => {
         body: JSON.stringify({
           contents: [{
             parts: [{
-              text: `You are an energetic, funny Bingo game host. A number has just been called in the game.
+              text: `You are a charismatic, witty Bingo game host with tons of energy! You're hosting a live game right now.
 
-Number called: ${getLetter(number)}-${number}
-Total numbers called so far: ${calledCount}
-Total players: ${players.length}
+CURRENT SITUATION:
+- Number just called: ${getLetter(number)}-${number}
+- Numbers called so far: ${calledCount} out of 75
+- Total players: ${playersArray.length}
+- Players close to winning: ${closeCalls > 0 ? 'YES! Multiple players are ONE away!' : 'Not yet'}
 
-Generate a brief, fun announcement (1-2 sentences max) that:
-1. Announces the number with a creative phrase or fun fact about the number
-2. Optionally adds light commentary about the game progress
+YOUR JOB: Create ONE fun announcement (2-3 sentences MAX) that:
+1. Creatively announces ${getLetter(number)}-${number} with a catchy phrase, rhyme, or fun fact about the number ${number}
+2. Add exciting commentary about the game progress
 
-Keep it short, energetic, and entertaining! Examples:
-- "B-7, lucky number seven! We're heating up, folks!"
-- "G-52, deck of cards! Someone's getting close, I can feel it!"
-- "N-42, the answer to life, the universe, and everything! Half the board is called!"
+STYLE: Be energetic, funny, and engaging! Use exclamations! Build excitement!
 
-Your announcement:`
+EXAMPLES:
+- "B-7, lucky number seven! We're just getting started folks, and I can already feel the energy in the room!"
+- "G-52, pick a number, any number! Wow, we're at the halfway mark and someone's getting dangerously close to BINGO!"
+- "N-42, the answer to life, the universe, and everything! Three players are just ONE number away - this could be it!"
+- "O-69, oh my! The crowd goes wild! We've called ${calledCount} numbers and the tension is absolutely electric!"
+- "I-25, quarter of a hundred! Keep your eyes on those cards, folks, victory is within reach!"
+
+Make it unique and exciting for ${getLetter(number)}-${number}! Your announcement:`
             }]
           }],
           generationConfig: {
-            temperature: 0.9,
-            maxOutputTokens: 100,
+            temperature: 1.0,
+            topP: 0.95,
+            topK: 40,
+            maxOutputTokens: 150,
           }
         })
       });
 
-      const data = await response.json();
-      if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
-        return data.candidates[0].content.parts[0].text.trim();
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Gemini API error:', response.status, errorText);
+        throw new Error(`API error: ${response.status}`);
       }
-      return `${getLetter(number)}-${number}! Let's go!`;
+
+      const data = await response.json();
+      console.log('✅ Gemini response:', data);
+      
+      if (data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
+        const announcement = data.candidates[0].content.parts[0].text.trim();
+        console.log('🎙️ AI Generated:', announcement);
+        return announcement;
+      }
+      
+      // Fallback messages with variety
+      const fallbacks = [
+        `${getLetter(number)}-${number}! We're at ${calledCount} numbers - keep those cards ready!`,
+        `Here comes ${getLetter(number)}-${number}! ${closeCalls > 0 ? "Someone's really close!" : "Still waiting for that first BINGO!"}`,
+        `${getLetter(number)}-${number}, let's go! ${calledCount} down, ${75 - calledCount} to go!`
+      ];
+      return fallbacks[Math.floor(Math.random() * fallbacks.length)];
+      
     } catch (error) {
-      console.error('AI announcement error:', error);
-      return `${getLetter(number)}-${number}!`;
+      console.error('❌ AI announcement error:', error);
+      // Enhanced fallback with number-specific facts
+      const numberFacts = {
+        7: `${getLetter(number)}-7, lucky number seven! The most popular lucky number worldwide!`,
+        11: `${getLetter(number)}-11, legs eleven! Looking good on the board!`,
+        13: `${getLetter(number)}-13, some say unlucky but not today! Fortune favors the bold!`,
+        21: `${getLetter(number)}-21, blackjack! A winning number in more ways than one!`,
+        42: `${getLetter(number)}-42, the answer to everything! Douglas Adams would be proud!`,
+        50: `${getLetter(number)}-50, halfway there! We're living on a prayer!`,
+        69: `${getLetter(number)}-69! Nice! The crowd is loving this one!`,
+        75: `${getLetter(number)}-75, the big one! Top of the board!`,
+      };
+      
+      return numberFacts[number] || `${getLetter(number)}-${number}! Number ${calledCount} is on the board - who's getting close?`;
     }
   };
 
