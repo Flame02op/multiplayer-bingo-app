@@ -12,6 +12,7 @@ const App = () => {
   const [gameData, setGameData] = useState(null);
   const [gameId, setGameId] = useState('');
   const [copied, setCopied] = useState(false);
+  const [isCallingNumber, setIsCallingNumber] = useState(false);
 
   // Generate a random bingo card
   const generateCard = () => {
@@ -143,8 +144,10 @@ const App = () => {
 
   // Call number (host only)
   const callNumber = async () => {
-    console.log('🎲 Calling number...')
     if (!isHost || !gameData || gameData.state !== 'playing' || !gameId) return;
+    if (isCallingNumber) return; // Prevent concurrent calls
+
+    setIsCallingNumber(true);
 
     const available = Array.from({ length: 75 }, (_, i) => i + 1)
       .filter(n => !(gameData.calledNumbers || []).includes(n));
@@ -152,11 +155,11 @@ const App = () => {
     if (available.length === 0) {
       const gameRef = ref(database, `games/${gameId}`);
       await update(gameRef, { state: 'ended' });
+      setIsCallingNumber(false);
       return;
     }
 
     const next = available[Math.floor(Math.random() * available.length)];
-    console.log('📢 Called number:', next);
     
     const gameRef = ref(database, `games/${gameId}`);
     const updates = {
@@ -183,7 +186,13 @@ const App = () => {
       }
     });
 
-    await update(gameRef, updates);
+    try {
+      await update(gameRef, updates);
+    } catch (error) {
+      console.error('Error calling number:', error);
+    } finally {
+      setIsCallingNumber(false);
+    }
   };
 
   // Check if a card has won
@@ -263,17 +272,18 @@ const App = () => {
     if (!isHost || !gameData || !gameData.autoCall || gameData.state !== 'playing') return;
 
     const interval = setInterval(() => {
-      callNumber();
-    }, gameData.callSpeed);
+      if (!isCallingNumber) {
+        callNumber();
+      }
+    }, gameData.callSpeed || 3000);
 
     return () => clearInterval(interval);
-  }, [isHost, gameData?.autoCall, gameData?.state, gameData?.callSpeed]);
+  }, [isHost, gameData?.autoCall, gameData?.state, gameData?.callSpeed, isCallingNumber]);
 
   // Update my card when game updates
   useEffect(() => {
     if (myId && gameData && gameData.players && gameData.players[myId]) {
       const myPlayer = gameData.players[myId];
-      console.log('🃏 Updating my card:', myPlayer.card);
       if (myPlayer.card) {
         setMyCard(myPlayer.card);
       }
